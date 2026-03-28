@@ -3,6 +3,13 @@
  *
  * Detects which version of the site we're on and provides
  * readiness checking for SDK initialisation.
+ * 
+ * IMPORTANT: This module NEVER creates persistent body-level observers.
+ * The site generates thousands of chat mutations per second — a body
+ * observer with subtree:true would process every single one and
+ * effectively crash the page.
+ * 
+ * All waiting/detection uses setInterval polling instead.
  */
 
 /**
@@ -39,30 +46,14 @@ export function isMobile() {
 }
 
 /**
- * Check if React has mounted on the page.
- *
- * NOTE: This only works from a page-injected script context.
- * It will always return false from a content script due to
- * Chrome's isolated world — __reactFiber$ keys are not visible
- * across the context boundary.
- */
-export function isReactMounted() {
-  return Object.keys(document.body).some(k => k.startsWith('__reactFiber$'));
-}
-
-/**
  * Check if the site appears ready for SDK use.
  * Looks for key elements that indicate the app has loaded.
- *
- * Note: does NOT check for React fibre keys (e.g. __reactFiber$) —
- * these are set in the page's JS context and are not visible to
- * content scripts running in an isolated world.
  */
 export function isSiteReady() {
   if (isCurrent()) {
     return (
-        document.getElementById('chat-input') !== null ||
-        document.querySelector('[data-react-window-index]') !== null
+      document.getElementById('chat-input') !== null ||
+      document.querySelector('[data-react-window-index]') !== null
     );
   }
 
@@ -75,88 +66,65 @@ export function isSiteReady() {
 
 /**
  * Wait for the site to be ready, then call the callback.
- * Uses a MutationObserver rather than polling — fires as soon as
- * the required elements appear in the DOM.
+ * 
+ * Uses setInterval polling — NOT a MutationObserver on document.body.
+ * Polling at 250ms is negligible overhead compared to a body observer
+ * that would fire on every DOM mutation (thousands per second on this site).
  *
  * @param {Function} callback - Called when the site is ready
  * @param {Object} options
+ * @param {number} options.interval - Poll interval in ms (default 250)
  * @param {number} options.timeout - Max wait in ms (default 30000)
  * @returns {Function} Cancel function
  */
 export function whenReady(callback, options = {}) {
-  const { timeout = 30000 } = options;
+  const { interval = 250, timeout = 30000 } = options;
 
+  // Check immediately
   if (isSiteReady()) {
     setTimeout(callback, 0);
     return () => {};
   }
 
-  let settled = false;
-  let timer = null;
+  const start = Date.now();
 
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    observer.disconnect();
-    callback();
-  };
+  const check = setInterval(() => {
+    if (isSiteReady()) {
+      clearInterval(check);
+      callback();
+    } else if (Date.now() - start > timeout) {
+      clearInterval(check);
+      console.warn('[ftl-ext-sdk] Site ready timeout after', timeout, 'ms.');
+    }
+  }, interval);
 
-  const observer = new MutationObserver(() => {
-    if (isSiteReady()) settle();
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  timer = setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    observer.disconnect();
-    console.warn('[ftl-ext-sdk] Site ready timeout after', timeout, 'ms.');
-  }, timeout);
-
-  return () => {
-    settled = true;
-    clearTimeout(timer);
-    observer.disconnect();
-  };
+  return () => clearInterval(check);
 }
 
 // ---------------------------------------------------------------------------
 // Current user detection
 // ---------------------------------------------------------------------------
 
-// Internal cache for current user
 let _currentUser = null;
-const _userCallbacks = new Set();
+
+/**
+ * CSS selector for the username element in the top bar.
+ */
+const USERNAME_SELECTOR = '.fixed.top-\\[calc\\(env\\(safe-area-inset-top\\)\\/2\\)\\] .whitespace-nowrap.font-bold';
 
 /**
  * Read the logged-in user's display name from the top bar.
  * Returns null if not logged in or element not yet in DOM.
  */
 function _readUsernameFromDom() {
-  const el = document.querySelector(
-      '.fixed.top-\\[calc\\(env\\(safe-area-inset-top\\)\\/2\\)\\] .whitespace-nowrap.font-bold'
-  );
+  const el = document.querySelector(USERNAME_SELECTOR);
   return el?.textContent?.trim() || null;
 }
 
-// Watch the DOM for the username element to appear or change.
-// Starts immediately at module load so it can't miss early renders.
-const _userObserver = new MutationObserver(() => {
-  const name = _readUsernameFromDom();
-  if (name && name !== _currentUser) {
-    _currentUser = name;
-    for (const cb of _userCallbacks) {
-      try { cb(_currentUser); } catch (e) { console.error('[ftl-ext-sdk] onUserDetected callback error:', e); }
-    }
-  }
-});
-_userObserver.observe(document.body, { childList: true, subtree: true });
-
 /**
  * Get the currently logged-in user's display name.
- * Returns null if not logged in or username not yet detected.
+ * Reads from cache if available, otherwise checks the DOM once.
+ * Returns null if not logged in or username not yet rendered.
  *
  * @returns {string|null}
  */
@@ -166,16 +134,45 @@ export function getCurrentUsername() {
 }
 
 /**
- * Register a callback that fires when the logged-in username is first detected
- * or changes (e.g. after login). Fires immediately if already known.
+ * Wait for the username to appear in the DOM, then call the callback.
+ * 
+ * Uses setInterval polling — NOT a persistent body observer.
+ * Checks every 500ms, gives up after timeout.
+ * Once found, the username is cached and the polling stops.
  *
  * @param {Function} callback - Called with the username string
- * @returns {Function} Unsubscribe function
+ * @param {number} timeout - Max wait in ms (default 30000)
+ * @returns {Function} Cancel function
  */
-export function onUserDetected(callback) {
-  _userCallbacks.add(callback);
+export function onUserDetected(callback, timeout = 30000) {
+  // Already cached
   if (_currentUser) {
-    try { callback(_currentUser); } catch (e) { console.error('[ftl-ext-sdk] onUserDetected callback error:', e); }
+    setTimeout(() => callback(_currentUser), 0);
+    return () => {};
   }
-  return () => _userCallbacks.delete(callback);
+  
+  // Check DOM immediately
+  const immediate = _readUsernameFromDom();
+  if (immediate) {
+    _currentUser = immediate;
+    setTimeout(() => callback(_currentUser), 0);
+    return () => {};
+  }
+  
+  // Poll until found
+  const start = Date.now();
+  
+  const check = setInterval(() => {
+    const name = _readUsernameFromDom();
+    if (name) {
+      _currentUser = name;
+      clearInterval(check);
+      callback(_currentUser);
+    } else if (Date.now() - start > timeout) {
+      clearInterval(check);
+      // User might not be logged in — that's fine, not an error
+    }
+  }, 500);
+  
+  return () => clearInterval(check);
 }
