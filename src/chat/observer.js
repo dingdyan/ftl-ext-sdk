@@ -474,6 +474,11 @@ export function onMessage(callback) {
  * Uses MutationObserver on the chat container's parent (the scrollable
  * wrapper) to detect when react-window adds/removes message elements.
  *
+ * Also starts a health-check interval that detects when React replaces
+ * the chat container (e.g. after modal open/close re-renders). If the
+ * observed container becomes detached from the DOM, the observer
+ * automatically reconnects to the new container.
+ *
  * @returns {boolean} True if observation started successfully
  */
 export function startObserving() {
@@ -484,44 +489,27 @@ export function startObserving() {
 
   const container = getChatContainer();
   if (!container) {
-    console.warn('[ftl-ext-sdk] Chat container not found — cannot start observing');
     return false;
   }
 
-  // Process any messages already in the DOM
-  processExistingMessages(container);
-
-  // Watch for new child elements (react-window adding/replacing items)
-  disconnectObserver = observe(container, (mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== 1) continue; // Skip text nodes
-
-        // Check if this is a message element or contains message elements
-        const messageElements = node.hasAttribute('data-react-window-index')
-            ? [node]
-            : [...node.querySelectorAll('[data-react-window-index]')];
-
-        for (const msgEl of messageElements) {
-          processMessageElement(msgEl);
-        }
-      }
-    }
-  }, { childList: true, subtree: true });
+  attachObserver(container);
+  startHealthCheck();
 
   console.log('[ftl-ext-sdk] Chat DOM observer started');
   return true;
 }
 
 /**
- * Stop observing the chat container.
+ * Stop observing the chat container and health check.
  */
 export function stopObserving() {
   if (disconnectObserver) {
     disconnectObserver();
     disconnectObserver = null;
-    console.log('[ftl-ext-sdk] Chat DOM observer stopped');
   }
+  stopHealthCheck();
+  observedContainer = null;
+  console.log('[ftl-ext-sdk] Chat DOM observer stopped');
 }
 
 /**
@@ -557,6 +545,93 @@ export async function waitAndObserve(timeout = 30000) {
  */
 export function isObserving() {
   return disconnectObserver !== null;
+}
+
+// ── Internal: observer attachment and health check ──────────────────
+
+// Reference to the container we're currently observing
+let observedContainer = null;
+
+// Health check interval ID
+let healthCheckInterval = null;
+
+/**
+ * Attach the MutationObserver to a specific container element.
+ */
+function attachObserver(container) {
+  // Disconnect any existing observer first
+  if (disconnectObserver) {
+    disconnectObserver();
+    disconnectObserver = null;
+  }
+
+  observedContainer = container;
+
+  // Process any messages already in the DOM
+  processExistingMessages(container);
+
+  // Watch for new child elements (react-window adding/replacing items)
+  disconnectObserver = observe(container, (mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== 1) continue; // Skip text nodes
+
+        // Check if this is a message element or contains message elements
+        const messageElements = node.hasAttribute('data-react-window-index')
+            ? [node]
+            : [...node.querySelectorAll('[data-react-window-index]')];
+
+        for (const msgEl of messageElements) {
+          processMessageElement(msgEl);
+        }
+      }
+    }
+  }, { childList: true, subtree: true });
+}
+
+/**
+ * Start the health check interval.
+ * Every 2 seconds, verify the observed container is still in the live DOM.
+ * If React has replaced it, reattach to the new container.
+ */
+function startHealthCheck() {
+  stopHealthCheck();
+
+  healthCheckInterval = setInterval(() => {
+    if (!observedContainer) return;
+
+    // Check if our observed container is still connected to the document
+    const stillConnected = observedContainer.isConnected;
+
+    if (!stillConnected) {
+      console.log('[ftl-ext-sdk] Chat container detached — reattaching observer');
+
+      // Find the new container
+      const newContainer = getChatContainer();
+      if (newContainer) {
+        attachObserver(newContainer);
+        console.log('[ftl-ext-sdk] Chat observer reattached to new container');
+      } else {
+        // Container gone entirely (e.g. navigated away from chat)
+        // Keep checking — it might come back
+        if (disconnectObserver) {
+          disconnectObserver();
+          disconnectObserver = null;
+        }
+        observedContainer = null;
+      }
+    }
+  }, 2000);
+}
+
+/**
+ * Stop the health check interval.
+ */
+function stopHealthCheck() {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+    healthCheckInterval = null;
+  }
 }
 
 /**
