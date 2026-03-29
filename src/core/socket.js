@@ -110,9 +110,9 @@ export async function connect(ioClient, msgpackParser, options = {}) {
         parser: msgpackParser,
         transports: ['websocket'],
         reconnection: true,
-        reconnectionAttempts: 10,
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 2000,
-        reconnectionDelayMax: 10000,
+        reconnectionDelayMax: 30000,
         autoConnect: true,
         // Socket.IO v4 auth option — sent as part of handshake
         auth: {
@@ -229,6 +229,19 @@ export function isAuthenticated() {
  */
 export function getSocket() {
   return socket;
+}
+
+/**
+ * Force the socket to disconnect and reconnect.
+ * Useful as a recovery mechanism if the connection appears stale.
+ * All existing event listeners are preserved across the reconnect.
+ */
+export function forceReconnect() {
+  if (!socket) return;
+  console.log('[ftl-ext-sdk] Forcing socket reconnect');
+  socket.disconnect();
+  // Socket.IO will automatically reconnect due to reconnection: true
+  socket.connect();
 }
 
 /**
