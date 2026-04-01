@@ -61,13 +61,19 @@ site.isSiteReady();      // true when key elements are present
 
 // Wait for site to be ready before initialising
 site.whenReady(() => {
-    console.log('Site is ready!');
+  console.log('Site is ready!');
 });
 
 // Detect the logged-in user
 site.getCurrentUsername();  // string or null
 site.onUserDetected((username) => {
-    console.log('Logged in as:', username);
+  console.log('Logged in as:', username);
+});
+
+// Detect the logged-in user's UUID (from auth cookie)
+site.getCurrentUserId();   // string or null
+site.onUserIdDetected((userId) => {
+  console.log('User ID:', userId);
 });
 ```
 
@@ -82,9 +88,14 @@ import * as msgpackParser from 'socket.io-msgpack-parser';
 // token: null = unauthenticated, undefined = auto-detect from cookie
 await socket.connect(io, msgpackParser, { token: null });
 
+// Room constants
+socket.ROOMS.GLOBAL;          // 'Global'
+socket.ROOMS.SEASON_PASS;     // 'Season Pass'
+socket.ROOMS.SEASON_PASS_XL;  // 'Season Pass XL'
+
 // Listen for any raw event
 const unsub = socket.on('chat:message', (data) => {
-    console.log(data);
+  console.log(data);
 });
 
 // Later: unsubscribe
@@ -132,29 +143,29 @@ import { chat } from 'ftl-ext-sdk';
 
 // Chat messages
 chat.messages.onMessage((msg) => {
-    console.log(`${msg.username}: ${msg.message}`);
-    console.log('Role:', msg.role);       // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
-    console.log('Colour:', msg.colour);   // custom username colour or null
-    console.log('Avatar:', msg.avatar);   // filename, e.g. "rchl.png"
-    console.log('Clan:', msg.clan);
-    console.log('Mentions:', msg.mentions); // [{displayName, userId}]
+  console.log(`${msg.username}: ${msg.message}`);
+  console.log('Role:', msg.role);       // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
+  console.log('Colour:', msg.colour);   // custom username colour or null
+  console.log('Avatar:', msg.avatar);   // filename, e.g. "rchl.png"
+  console.log('Clan:', msg.clan);
+  console.log('Mentions:', msg.mentions); // [{displayName, userId}]
 
-    // Raw socket data is always available if you need it
-    console.log('Raw:', msg.raw);
+  // Raw socket data is always available if you need it
+  console.log('Raw:', msg.raw);
 });
 
 // TTS (deduplicated across tts:insert and tts:update)
 chat.messages.onTTS((tts) => {
-    console.log(`[TTS] ${tts.username} in ${tts.room}: ${tts.message} (${tts.voice})`);
-    console.log('Audio ID:', tts.audioId);  // for CDN URL construction
-    console.log('Clan:', tts.clanTag);
+  console.log(`[TTS] ${tts.username} in ${tts.room}: ${tts.message} (${tts.voice})`);
+  console.log('Audio ID:', tts.audioId);  // for CDN URL construction
+  console.log('Clan:', tts.clanTag);
 });
 
 // SFX (deduplicated across sfx:insert and sfx:update)
 chat.messages.onSFX((sfx) => {
-    console.log(`[SFX] ${sfx.username} in ${sfx.room}: ${sfx.message}`);
-    console.log('Audio file:', sfx.audioFile);  // filename from CDN URL
-    console.log('Clan:', sfx.clanTag);
+  console.log(`[SFX] ${sfx.username} in ${sfx.room}: ${sfx.message}`);
+  console.log('Audio file:', sfx.audioFile);  // filename from CDN URL
+  console.log('Clan:', sfx.clanTag);
 });
 
 // Convenience helpers (work on normalised objects)
@@ -169,17 +180,18 @@ chat.messages.mentionsUser(msg, 'username'); // boolean
 
 ```js
 {
-    username: "BarryThePirate",       // display name
-        message: "Hello world",           // message text
-        role: "staff",                    // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
-        colour: "#966b9e",               // custom username colour or null
-        avatar: "rchl.png",              // avatar filename (extracted from CDN URL)
-        clan: null,                       // clan tag or null
-        endorsement: null,                // endorsement badge text or null
-        mentions: [                       // normalised mention objects
-        { displayName: "someuser", userId: "uuid-..." }
-    ],
-        raw: { /* original socket data */ },
+  username: "BarryThePirate",       // display name
+  message: "Hello world",           // message text
+  role: "staff",                    // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
+  colour: "#966b9e",               // custom username colour or null
+  avatar: "rchl.png",              // avatar filename (extracted from CDN URL)
+  clan: null,                       // clan tag or null
+  endorsement: null,                // endorsement badge text or null
+  chatRoom: "Global",              // 'Global' | 'Season Pass' | 'Season Pass XL'
+  mentions: [                       // normalised mention objects
+    { displayName: "someuser", userId: "uuid-..." }
+  ],
+  raw: { /* original socket data */ },
 }
 ```
 
@@ -187,13 +199,13 @@ chat.messages.mentionsUser(msg, 'username'); // boolean
 
 ```js
 {
-    username: "SomeUser",
-        message: "Hello from TTS",
-        voice: "Brainrot",                // voice name
-        room: "brrr-5",                   // room code (use player.streams.roomName() to resolve)
-        audioId: "abc123",                // TTS ID (CDN URL: https://cdn.fishtank.live/tts/{audioId}.mp3)
-        clanTag: null,
-        raw: { /* original socket data */ },
+  username: "SomeUser",
+  message: "Hello from TTS",
+  voice: "Brainrot",                // voice name
+  room: "brrr-5",                   // room code (use player.streams.roomName() to resolve)
+  audioId: "abc123",                // TTS ID (CDN URL: https://cdn.fishtank.live/tts/{audioId}.mp3)
+  clanTag: null,
+  raw: { /* original socket data */ },
 }
 ```
 
@@ -201,12 +213,12 @@ chat.messages.mentionsUser(msg, 'username'); // boolean
 
 ```js
 {
-    username: "SomeUser",
-        message: "Airhorn",               // sound name
-        room: "brrr-5",
-        audioFile: "Airhorn-123456.mp3",  // filename (CDN URL: https://cdn.fishtank.live/sfx/{audioFile})
-        clanTag: null,
-        raw: { /* original socket data */ },
+  username: "SomeUser",
+  message: "Airhorn",               // sound name
+  room: "brrr-5",
+  audioFile: "Airhorn-123456.mp3",  // filename (CDN URL: https://cdn.fishtank.live/sfx/{audioFile})
+  clanTag: null,
+  raw: { /* original socket data */ },
 }
 ```
 
@@ -218,6 +230,38 @@ The SDK resolves the highest-priority role from the socket metadata flags:
 
 A user with both `isAdmin` and `isFish` set to true will have `role: 'staff'`.
 
+### `chat.rooms` — Multi-Room Monitoring
+
+By default, the primary socket receives Global chat only. Use `chat.rooms` to subscribe to Season Pass and Season Pass XL rooms. Messages from all subscribed rooms flow through the same `chat.messages.onMessage()` callbacks — each message includes a `chatRoom` field indicating its source.
+
+Room subscriptions require authentication (the server silently ignores room switches from anonymous sockets). The SDK auto-detects the auth token from the site's cookie.
+
+```js
+import { chat } from 'ftl-ext-sdk';
+
+// Subscribe to additional rooms
+await chat.rooms.subscribe('Season Pass');
+await chat.rooms.subscribe('Season Pass XL');
+
+// Or subscribe to all extra rooms at once
+await chat.rooms.subscribeAll();
+
+// Messages now include chatRoom field
+chat.messages.onMessage((msg) => {
+  console.log(`[${msg.chatRoom}] ${msg.username}: ${msg.message}`);
+});
+
+// Check subscriptions
+chat.rooms.getSubscribed();                // ['Season Pass', 'Season Pass XL']
+chat.rooms.isSubscribed('Season Pass');    // true
+
+// Unsubscribe
+chat.rooms.unsubscribe('Season Pass XL');
+chat.rooms.unsubscribeAll();
+```
+
+> **Note:** Each room subscription opens a separate authenticated WebSocket connection. Global is always handled by the primary socket and cannot be unsubscribed.
+
 ### `chat.observer` — DOM-Based Chat Observation (Lightweight)
 
 The simplest way to watch chat. No auth, no extra connections. Observes the chat DOM for new messages and parses them.
@@ -227,12 +271,12 @@ import { chat } from 'ftl-ext-sdk';
 
 // Watch for new messages in the DOM
 chat.observer.onMessage((msg) => {
-    console.log(`${msg.username}: ${msg.message}`);
+  console.log(`${msg.username}: ${msg.message}`);
 
-    // The raw DOM element is available for visual modifications
-    if (msg.role === 'staff') {
-        msg.element.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
-    }
+  // The raw DOM element is available for visual modifications
+  if (msg.role === 'staff') {
+    msg.element.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
+  }
 });
 
 // Start observing (call after site is ready)
@@ -297,12 +341,12 @@ events.isModalOpen();
 
 // Watch for specific modals
 const unsub = events.onModalOpen('craftItem', (modalElement, data) => {
-    // Inject your content into the modal
+  // Inject your content into the modal
 });
 
 // Watch all modal events
 events.onModalEvent((action, detail) => {
-    // action: 'open' | 'close' | 'confirm'
+  // action: 'open' | 'close' | 'confirm'
 });
 ```
 
@@ -326,24 +370,24 @@ import { ui } from 'ftl-ext-sdk';
 
 // Register a shortcut (auto-skips when user is typing)
 const unsub = ui.keyboard.register('my-shortcut', { key: 'e' }, () => {
-    console.log('E pressed!');
+  console.log('E pressed!');
 });
 
 // With modifiers
 ui.keyboard.register('save', { key: 's', ctrl: true }, () => {
-    console.log('Ctrl+S pressed!');
+  console.log('Ctrl+S pressed!');
 });
 
 // Stop the event from reaching other handlers
 ui.keyboard.register('intercept-t', { key: 't', stopPropagation: true }, () => {
-    console.log('T intercepted — site handler will not fire');
+  console.log('T intercepted — site handler will not fire');
 });
 
 // The callback receives the keyboard event for conditional logic
 ui.keyboard.register('conditional', { key: 'x' }, (e) => {
-    if (someCondition) {
-        e.stopImmediatePropagation();
-    }
+  if (someCondition) {
+    e.stopImmediatePropagation();
+  }
 });
 
 // Unregister
@@ -370,9 +414,9 @@ ui.keyboard.unregisterAll();  // remove all
 import { ui } from 'ftl-ext-sdk';
 
 const id = ui.toasts.notify('Hello!', {
-    description: 'This is a toast',
-    type: 'success',    // 'default' | 'success' | 'error' | 'info'
-    duration: 5000,     // ms (0 for persistent)
+  description: 'This is a toast',
+  type: 'success',    // 'default' | 'success' | 'error' | 'info'
+  duration: 5000,     // ms (0 for persistent)
 });
 
 ui.toasts.dismiss(id);
@@ -389,9 +433,9 @@ import { ui } from 'ftl-ext-sdk';
 await ui.toastObserver.waitAndObserve();
 
 ui.toastObserver.onToast((toast) => {
-    console.log('Title:', toast.title);
-    console.log('Description:', toast.description);
-    console.log('Image:', toast.imageUrl);
+  console.log('Title:', toast.title);
+  console.log('Description:', toast.description);
+  console.log('Image:', toast.imageUrl);
 });
 
 ui.toastObserver.isObserving();
