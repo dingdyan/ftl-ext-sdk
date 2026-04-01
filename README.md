@@ -16,6 +16,8 @@ import { site, chat, ui, socket } from 'ftl-ext-sdk';
 
 ### Tampermonkey / Greasemonkey
 
+[Implementation Bounty Open](https://github.com/BarryThePirate/ftl-ext-sdk/issues/1). Reward: ₣1,000 Site Tokens.
+
 Support planned. The SDK currently uses ES module exports and needs a UMD/IIFE bundle with `window.FTL` for userscript environments.
 
 ## Quick Start
