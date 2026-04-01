@@ -47,6 +47,7 @@ export const EVENTS = {
   CHAT_PRESENCE: 'chat:presence',
 
   // TTS
+  TTS_INSERT: 'tts:insert',
   TTS_UPDATE: 'tts:update',
 
   // SFX

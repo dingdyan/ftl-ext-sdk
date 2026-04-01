@@ -16,7 +16,7 @@ import { site, chat, ui, socket } from 'ftl-ext-sdk';
 
 ### Tampermonkey / Greasemonkey
 
-Support planned. The SDK currently uses ES module exports and needs a UMD/IIFE bundle with window.FTL for userscript environments.
+Support planned. The SDK currently uses ES module exports and needs a UMD/IIFE bundle with `window.FTL` for userscript environments.
 
 ## Quick Start
 
@@ -25,53 +25,26 @@ import { site, chat, ui, socket, events } from 'ftl-ext-sdk';
 import { io } from 'socket.io-client';
 import * as msgpackParser from 'socket.io-msgpack-parser';
 
-// Wait for the site to load
 site.whenReady(async () => {
 
-  // Connect to the chat WebSocket
-  await socket.connect(io, msgpackParser, { token: null });
+    // Connect to the chat WebSocket (token: null = anonymous)
+    await socket.connect(io, msgpackParser, { token: null });
 
-  // Start listening for chat events
-  chat.messages.startListening();
+    // Log all chat messages
+    chat.messages.onMessage((msg) => {
+        console.log(`[${msg.role || 'user'}] ${msg.username}: ${msg.message}`);
+    });
 
-  // Log staff messages
-  chat.messages.onMessage((msg) => {
-    if (chat.messages.isStaffMessage(msg)) {
-      console.log(`[Staff] ${msg.user.displayName}: ${msg.message}`);
-    }
-  });
+    // React to modal events
+    events.onModalEvent((action, detail) => {
+        console.log(`Modal ${action}:`, detail?.modal);
+    });
 
-  // Log TTS
-  chat.messages.onTTS((tts) => {
-    console.log(`[TTS] ${tts.displayName} in ${tts.room}: ${tts.message} (${tts.voice})`);
-  });
-
-  // Log SFX
-  chat.messages.onSFX((sfx) => {
-    console.log(`[SFX] ${sfx.displayName} in ${sfx.room}: ${sfx.sound}`);
-  });
-
-  // Register keyboard shortcuts
-  ui.keyboard.register('fullscreen', { key: 'f' }, () => {
-    // Your fullscreen logic
-  });
-
-  ui.keyboard.register('settings', { key: 'e' }, () => {
-    // Open your settings modal
-  });
-
-  // Watch for craft modal
-  events.onModalOpen('craftItem', (modal, data) => {
-    // Inject recipe data into the modal
-  });
-
-  // Show a toast
-  ui.toasts.notify('Extension loaded!', {
-    description: 'ftl-ext-sdk is active',
-    type: 'success',
-  });
+    ui.toasts.notify('Extension loaded!', { type: 'success' });
 });
 ```
+
+Socket listeners start automatically when you register a callback — no manual setup step needed.
 
 ## Modules
 
@@ -88,13 +61,13 @@ site.isSiteReady();      // true when key elements are present
 
 // Wait for site to be ready before initialising
 site.whenReady(() => {
-  console.log('Site is ready!');
+    console.log('Site is ready!');
 });
 
 // Detect the logged-in user
 site.getCurrentUsername();  // string or null
 site.onUserDetected((username) => {
-  console.log('Logged in as:', username);
+    console.log('Logged in as:', username);
 });
 ```
 
@@ -109,9 +82,9 @@ import * as msgpackParser from 'socket.io-msgpack-parser';
 // token: null = unauthenticated, undefined = auto-detect from cookie
 await socket.connect(io, msgpackParser, { token: null });
 
-// Listen for any event
+// Listen for any raw event
 const unsub = socket.on('chat:message', (data) => {
-  console.log(data);
+    console.log(data);
 });
 
 // Later: unsubscribe
@@ -138,12 +111,112 @@ socket.getSocket();
 | `EVENTS.CHAT_MESSAGE` | `chat:message` | Chat messages (including happenings) |
 | `EVENTS.CHAT_ROOM` | `chat:room` | Room change events |
 | `EVENTS.CHAT_PRESENCE` | `chat:presence` | Chat presence updates |
-| `EVENTS.TTS_UPDATE` | `tts:update` | TTS submissions and status changes |
+| `EVENTS.TTS_INSERT` | `tts:insert` | TTS submissions |
+| `EVENTS.TTS_UPDATE` | `tts:update` | TTS status changes |
 | `EVENTS.SFX_INSERT` | `sfx:insert` | SFX submissions |
 | `EVENTS.SFX_UPDATE` | `sfx:update` | SFX status changes |
 | `EVENTS.CRAFTING_RECIPE_LEARNED` | `items:crafting-recipe:learned` | New crafting recipe discovered |
 | `EVENTS.NOTIFICATION_GLOBAL` | `notification:global` | Global notifications / admin messages |
 | `EVENTS.PRESENCE` | `presence` | User presence updates |
+
+> **Note:** The server sends TTS and SFX events inconsistently — sometimes `:insert`, sometimes `:update`, sometimes both. If you use `chat.messages.onTTS()` / `chat.messages.onSFX()` (recommended), the SDK listens on both and deduplicates automatically. If you use raw `socket.on()`, you'll need to handle this yourself.
+
+### `chat.messages` — Socket.IO Chat (Normalised)
+
+The recommended way to receive chat messages, TTS, and SFX events. The SDK normalises the raw socket data into clean objects, handles array unwrapping, resolves role priority from metadata flags, and deduplicates TTS/SFX events.
+
+Socket listeners start automatically on the first callback registration — no setup step needed.
+
+```js
+import { chat } from 'ftl-ext-sdk';
+
+// Chat messages
+chat.messages.onMessage((msg) => {
+    console.log(`${msg.username}: ${msg.message}`);
+    console.log('Role:', msg.role);       // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
+    console.log('Colour:', msg.colour);   // custom username colour or null
+    console.log('Avatar:', msg.avatar);   // filename, e.g. "rchl.png"
+    console.log('Clan:', msg.clan);
+    console.log('Mentions:', msg.mentions); // [{displayName, userId}]
+
+    // Raw socket data is always available if you need it
+    console.log('Raw:', msg.raw);
+});
+
+// TTS (deduplicated across tts:insert and tts:update)
+chat.messages.onTTS((tts) => {
+    console.log(`[TTS] ${tts.username} in ${tts.room}: ${tts.message} (${tts.voice})`);
+    console.log('Audio ID:', tts.audioId);  // for CDN URL construction
+    console.log('Clan:', tts.clanTag);
+});
+
+// SFX (deduplicated across sfx:insert and sfx:update)
+chat.messages.onSFX((sfx) => {
+    console.log(`[SFX] ${sfx.username} in ${sfx.room}: ${sfx.message}`);
+    console.log('Audio file:', sfx.audioFile);  // filename from CDN URL
+    console.log('Clan:', sfx.clanTag);
+});
+
+// Convenience helpers (work on normalised objects)
+chat.messages.isStaffMessage(msg);          // boolean
+chat.messages.isFishMessage(msg);           // boolean
+chat.messages.isModMessage(msg);            // boolean
+chat.messages.isHappening(msg);             // boolean
+chat.messages.mentionsUser(msg, 'username'); // boolean
+```
+
+#### Normalised Message Shape
+
+```js
+{
+    username: "BarryThePirate",       // display name
+        message: "Hello world",           // message text
+        role: "staff",                    // 'staff' | 'mod' | 'fish' | 'grandMarshal' | 'epic' | null
+        colour: "#966b9e",               // custom username colour or null
+        avatar: "rchl.png",              // avatar filename (extracted from CDN URL)
+        clan: null,                       // clan tag or null
+        endorsement: null,                // endorsement badge text or null
+        mentions: [                       // normalised mention objects
+        { displayName: "someuser", userId: "uuid-..." }
+    ],
+        raw: { /* original socket data */ },
+}
+```
+
+#### Normalised TTS Shape
+
+```js
+{
+    username: "SomeUser",
+        message: "Hello from TTS",
+        voice: "Brainrot",                // voice name
+        room: "brrr-5",                   // room code (use player.streams.roomName() to resolve)
+        audioId: "abc123",                // TTS ID (CDN URL: https://cdn.fishtank.live/tts/{audioId}.mp3)
+        clanTag: null,
+        raw: { /* original socket data */ },
+}
+```
+
+#### Normalised SFX Shape
+
+```js
+{
+    username: "SomeUser",
+        message: "Airhorn",               // sound name
+        room: "brrr-5",
+        audioFile: "Airhorn-123456.mp3",  // filename (CDN URL: https://cdn.fishtank.live/sfx/{audioFile})
+        clanTag: null,
+        raw: { /* original socket data */ },
+}
+```
+
+#### Role Priority
+
+The SDK resolves the highest-priority role from the socket metadata flags:
+
+`staff` > `mod` > `fish` > `grandMarshal` > `epic` > `null`
+
+A user with both `isAdmin` and `isFish` set to true will have `role: 'staff'`.
 
 ### `chat.observer` — DOM-Based Chat Observation (Lightweight)
 
@@ -154,87 +227,50 @@ import { chat } from 'ftl-ext-sdk';
 
 // Watch for new messages in the DOM
 chat.observer.onMessage((msg) => {
-  console.log(`${msg.username}: ${msg.message}`);
-  console.log('Timestamp:', msg.timestamp);
-  console.log('Avatar:', msg.avatarUrl);
-  console.log('Level:', msg.level);
-  console.log('Mentions:', msg.mentions);
+    console.log(`${msg.username}: ${msg.message}`);
 
-  // The raw DOM element is available for visual modifications
-  if (msg.role === 'staff') {
-    msg.element.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
-  }
+    // The raw DOM element is available for visual modifications
+    if (msg.role === 'staff') {
+        msg.element.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
+    }
 });
 
 // Start observing (call after site is ready)
 chat.observer.startObserving();
 
-// Convenience helpers
-chat.observer.isStaffMessage(msg);              // boolean
-chat.observer.isFishMessage(msg);               // boolean
-chat.observer.isModMessage(msg);                // boolean
-chat.observer.isTTSMessage(msg);                // boolean
-chat.observer.isSFXMessage(msg);                // boolean
-chat.observer.isChatMessage(msg);               // boolean
-chat.observer.mentionsUser(msg, 'username');     // boolean
+// Or wait for chat to appear, then start
+await chat.observer.waitAndObserve();
 
-// Parse a specific element manually
-const parsed = chat.observer.parseMessageElement(someElement);
+// Convenience helpers
+chat.observer.isStaffMessage(msg);
+chat.observer.isFishMessage(msg);
+chat.observer.isModMessage(msg);
+chat.observer.isTTSMessage(msg);
+chat.observer.isSFXMessage(msg);
+chat.observer.isChatMessage(msg);
+chat.observer.mentionsUser(msg, 'username');
 
 // Stop observing
 chat.observer.stopObserving();
 ```
 
-> **Note:** The site uses react-window to virtualise the chat list, keeping only ~17 messages
-> in the DOM at any time. React-window frequently replaces DOM nodes entirely during
-> re-renders, which can cause the MutationObserver to lose its connection to the container
-> and stop firing. This makes DOM-based chat observation unreliable for long-running sessions.
-> For reliable message capture, use `chat.messages` (Socket.IO) instead. The DOM observer
-> is best suited for one-off parsing or short-lived UI modifications where you need access
-> to the rendered elements.
+> **Reliability warning:** The site uses react-window to virtualise chat, keeping only ~17 messages
+> in the DOM at any time. React-window frequently replaces DOM nodes during re-renders, which can
+> cause the observer to lose its connection. For reliable, long-running message capture, use
+> `chat.messages` (Socket.IO) instead. The DOM observer is best suited for UI modifications where
+> you need access to the rendered elements.
 
-#### Observer vs Socket.IO — Which to use?
+#### Observer vs Socket — Which to use?
 
 | | `chat.observer` (DOM) | `chat.messages` (Socket.IO) |
 |---|---|---|
 | Auth required | No | Optional |
 | Extra connections | None | 1 WebSocket |
-| Data richness | Text, username, avatar, level | Full user object, medals, metadata flags |
-| Reliability | May miss fast-scrolling messages | Captures every message |
-| Visual modifications | Yes (has DOM element ref) | No (data only) |
-| TTS/SFX | Only if rendered in chat | Dedicated events with full data |
-| **Best for** | Simple extensions, UI mods | Comprehensive logging, analytics |
-
-### `chat.messages` — Socket.IO Chat Interception (Full Data)
-
-```js
-import { chat } from 'ftl-ext-sdk';
-
-// Register callbacks (can be done before socket connects)
-chat.messages.onMessage((msg) => {
-  console.log(`${msg.user.displayName}: ${msg.message}`);
-  console.log('Watching:', msg.metadata.watching);
-  console.log('Is fish:', msg.metadata.isFish);
-});
-
-chat.messages.onTTS((tts) => {
-  console.log(`TTS by ${tts.displayName}: ${tts.message}`);
-});
-
-chat.messages.onSFX((sfx) => {
-  console.log(`SFX by ${sfx.displayName}: ${sfx.sound}`);
-});
-
-// After socket connects, start listening
-chat.messages.startListening();
-
-// Convenience helpers
-chat.messages.isFishMessage(msg);           // boolean
-chat.messages.isStaffMessage(msg);          // boolean
-chat.messages.isModMessage(msg);            // boolean
-chat.messages.isHappening(msg);             // boolean
-chat.messages.mentionsUser(msg, 'username'); // boolean
-```
+| Data | Text, username, avatar, level | Full normalised data + raw socket data |
+| Reliability | May miss messages during re-renders | Captures every message |
+| DOM access | Yes (element ref) | No (data only) |
+| TTS/SFX | Only if rendered in chat | Dedicated events with deduplication |
+| **Best for** | UI modifications, visual tweaks | Logging, analytics, bots |
 
 ### `chat.input` — Chat Input
 
@@ -257,17 +293,16 @@ import { events } from 'ftl-ext-sdk';
 // Open/close modals
 events.openModal('craftItem', { someData: true });
 events.closeModal();
-events.openConfirmModal({ someData: true });
-events.isModalOpen(); // boolean
+events.isModalOpen();
 
 // Watch for specific modals
 const unsub = events.onModalOpen('craftItem', (modalElement, data) => {
-  // Inject your content into the modal
+    // Inject your content into the modal
 });
 
 // Watch all modal events
 events.onModalEvent((action, detail) => {
-  // action: 'open' | 'close' | 'confirm'
+    // action: 'open' | 'close' | 'confirm'
 });
 ```
 
@@ -291,48 +326,36 @@ import { ui } from 'ftl-ext-sdk';
 
 // Register a shortcut (auto-skips when user is typing)
 const unsub = ui.keyboard.register('my-shortcut', { key: 'e' }, () => {
-  console.log('E pressed!');
+    console.log('E pressed!');
 });
 
 // With modifiers
 ui.keyboard.register('save', { key: 's', ctrl: true }, () => {
-  console.log('Ctrl+S pressed!');
+    console.log('Ctrl+S pressed!');
 });
 
-// Stop the event from reaching other handlers (e.g. the site's own shortcuts)
+// Stop the event from reaching other handlers
 ui.keyboard.register('intercept-t', { key: 't', stopPropagation: true }, () => {
-  console.log('T intercepted — site handler will not fire');
-});
-
-// Don't prevent the browser's default action (needed for some APIs like fullscreen)
-ui.keyboard.register('fullscreen', { key: 'f', preventDefault: false }, () => {
-  document.documentElement.requestFullscreen();
+    console.log('T intercepted — site handler will not fire');
 });
 
 // The callback receives the keyboard event for conditional logic
 ui.keyboard.register('conditional', { key: 'x' }, (e) => {
-  if (someCondition) {
-    e.stopImmediatePropagation(); // Conditionally block other handlers
-  }
+    if (someCondition) {
+        e.stopImmediatePropagation();
+    }
 });
 
 // Unregister
 unsub();
-// or
 ui.keyboard.unregister('my-shortcut');
-
-// List all registered shortcuts
-ui.keyboard.getRegistered(); // ['my-shortcut', 'save', ...]
-
-// Remove all shortcuts
-ui.keyboard.unregisterAll();
+ui.keyboard.getRegistered();  // list all
+ui.keyboard.unregisterAll();  // remove all
 ```
-
-#### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `key` | (required) | Key to listen for (e.g. `'e'`, `'escape'`, `'f'`) |
+| `key` | *(required)* | Key to listen for (e.g. `'e'`, `'escape'`, `'f'`) |
 | `ctrl` | `false` | Require Ctrl key |
 | `alt` | `false` | Require Alt key |
 | `shift` | `false` | Require Shift key |
@@ -346,41 +369,32 @@ ui.keyboard.unregisterAll();
 ```js
 import { ui } from 'ftl-ext-sdk';
 
-// Show a toast
 const id = ui.toasts.notify('Hello!', {
-  description: 'This is a toast',
-  type: 'success',    // 'default' | 'success' | 'error' | 'info'
-  duration: 5000,     // ms, 0 for persistent
+    description: 'This is a toast',
+    type: 'success',    // 'default' | 'success' | 'error' | 'info'
+    duration: 5000,     // ms (0 for persistent)
 });
 
-// Dismiss a specific toast
 ui.toasts.dismiss(id);
 ```
 
 ### `ui.toastObserver` — Site Toast Observation
 
-Watch for the site's own toast notifications (admin messages, item drops, crafting alerts, etc.).
+Watch for the site's own toast notifications (admin messages, item drops, crafting alerts).
 
 ```js
 import { ui } from 'ftl-ext-sdk';
 
-// Wait for the site's toast container to appear, then start observing
-const started = await ui.toastObserver.waitAndObserve();
+// Wait for the toast container, then start observing
+await ui.toastObserver.waitAndObserve();
 
-// Register a callback for new toasts
 ui.toastObserver.onToast((toast) => {
-  console.log('Title:', toast.title);
-  console.log('Description:', toast.description);
-  console.log('Image URL:', toast.imageUrl);
+    console.log('Title:', toast.title);
+    console.log('Description:', toast.description);
+    console.log('Image:', toast.imageUrl);
 });
 
-// Parse a toast element manually
-const parsed = ui.toastObserver.parseToastElement(someElement);
-
-// Check status
-ui.toastObserver.isObserving(); // boolean
-
-// Stop observing
+ui.toastObserver.isObserving();
 ui.toastObserver.stopObserving();
 ```
 
@@ -389,17 +403,17 @@ ui.toastObserver.stopObserving();
 ```js
 import { player } from 'ftl-ext-sdk';
 
-// Streams / Room names
-player.streams.fetchRoomNames();            // Fetch room names from the API (cached)
-player.streams.roomName('living-room');      // 'Living Room' (human-readable)
-player.streams.getRoomMap();                 // { 'living-room': 'Living Room', ... }
-player.streams.isPlayerOpen();              // boolean
-player.streams.getPlayerElement();          // DOM element or null
+// Room names
+player.streams.fetchRoomNames();             // fetch from API (cached in localStorage)
+player.streams.roomName('brrr-5');           // 'Bar' (human-readable)
+player.streams.getRoomMap();                 // full map
+player.streams.isPlayerOpen();
+player.streams.getPlayerElement();
 
 // Video
-player.video.getElement();       // The video element or null
-player.video.toggleFullscreen(); // Toggle browser fullscreen
-player.video.isFullscreen();     // boolean
+player.video.getElement();
+player.video.toggleFullscreen();
+player.video.isFullscreen();
 ```
 
 ### `dom` — DOM Helpers
@@ -419,15 +433,13 @@ const el = await dom.waitForElement('#modal');
 
 // Observe an element (returns disconnect function)
 const disconnect = dom.observe(someElement, (mutations) => {
-  // Handle mutations
+    // ...
 }, { childList: true, subtree: true });
 
-// Inject content (tagged for easy cleanup)
+// Inject content (tagged with data-ftl-sdk for cleanup)
 dom.inject(myElement, targetElement, 'append', 'my-injection');
-
-// Remove injected content
-dom.removeInjected('my-injection');  // specific
-dom.removeInjected();                // all SDK injections
+dom.removeInjected('my-injection');  // remove specific
+dom.removeInjected();                // remove all SDK injections
 ```
 
 ### `storage` — Local Storage
@@ -435,13 +447,13 @@ dom.removeInjected();                // all SDK injections
 ```js
 import { storage } from 'ftl-ext-sdk';
 
-// All keys are automatically prefixed with 'ftl-sdk:'
+// All keys are prefixed with 'ftl-sdk:' to avoid collisions
 storage.set('myKey', { some: 'data' });
 storage.get('myKey');          // { some: 'data' }
 storage.get('missing', []);    // [] (default value)
 storage.remove('myKey');
 storage.keys();                // ['myKey', ...]
-storage.clear();               // Clears only SDK keys
+storage.clear();               // clears only SDK keys
 ```
 
 ### `react` — React Fiber Access (Advanced)
@@ -449,51 +461,33 @@ storage.clear();               // Clears only SDK keys
 ```js
 import { react } from 'ftl-ext-sdk';
 
-// Check if React is available
-react.isAvailable(); // boolean
+react.isAvailable();
+react.getReactFiberKey();
+react.getFiber(someElement);
+react.getProps(someElement);
 
-// Get the React fiber key for the current page
-react.getReactFiberKey(); // e.g. '__reactFiber$abc123'
+// Walk the fiber tree
+react.walkFiberUp(element, (fiber) => fiber.memoizedProps?.someProp);
+react.walkFiberDown(fiber, (fiber) => fiber.type === 'SomeComponent');
 
-// Get fiber for a DOM element
-const fiber = react.getFiber(someElement);
+// Find hook state
+react.findHookState(fiber, (state) => state?.someField === 'value');
 
-// Get React props for a DOM element
-const props = react.getProps(someElement);
-
-// Walk the fiber tree upward
-react.walkFiberUp(element, (fiber) => {
-  // Return true to stop and return this fiber
-  return fiber.memoizedProps?.someSpecificProp;
-});
-
-// Walk the fiber tree downward
-react.walkFiberDown(fiber, (fiber) => {
-  return fiber.type === 'SomeComponent';
-});
-
-// Find a hook state value in a fiber
-react.findHookState(fiber, (state) => {
-  return state?.someField === 'value';
-});
-
-// Search the entire fiber tree from the root
-react.findInTree((fiber) => {
-  return fiber.memoizedProps?.targetProp;
-});
+// Search the entire tree from root
+react.findInTree((fiber) => fiber.memoizedProps?.targetProp);
 ```
 
 ## Firefox Compatibility
 
-Firefox content scripts run in a separate JavaScript realm from the page. This causes two issues when building extensions with this SDK:
+Firefox content scripts run in a separate JavaScript realm from the page. This causes three issues:
 
 ### 1. Socket.IO Binary Data (ArrayBuffer cross-realm failure)
 
-WebSocket binary data arrives as an `ArrayBuffer` created in the page's realm. Both `engine.io-parser` and `notepack.io` use `data instanceof ArrayBuffer` checks, which fail across realms because the content script's `ArrayBuffer` class is different from the page's.
+WebSocket binary data arrives as an `ArrayBuffer` from the page's realm. Libraries like `engine.io-parser` and `notepack.io` use `instanceof ArrayBuffer` checks, which fail across realms.
 
-**Symptoms:** Socket connects briefly then disconnects with `parse error` in a loop. Chat, TTS, and SFX events are never received.
+**Symptoms:** Socket connects briefly then disconnects with `parse error` in a loop.
 
-**Fix:** Add this Rollup plugin to your `rollup.config.js` to patch the `instanceof` checks with a realm-agnostic alternative at bundle time:
+**Fix:** Add this Rollup plugin to patch `instanceof` checks at bundle time:
 
 ```js
 function firefoxArrayBufferFix() {
@@ -503,13 +497,11 @@ function firefoxArrayBufferFix() {
             let patched = code;
             let patchCount = 0;
 
-            // Patch 1: engine.io-parser's mapBinary
             patched = patched.replace(
                 /if \(data instanceof ArrayBuffer\) \{\s*\/\/ from HTTP long-polling \(base64\) or WebSocket \+ binaryType "arraybuffer"/g,
                 (match) => { patchCount++; return 'if (data instanceof ArrayBuffer || Object.prototype.toString.call(data) === "[object ArrayBuffer]") {\n                // from HTTP long-polling (base64) or WebSocket + binaryType "arraybuffer"'; }
             );
 
-            // Patch 2: notepack.io's browser Decoder constructor
             patched = patched.replace(
                 /if \(buffer instanceof ArrayBuffer\) \{/g,
                 (match) => { patchCount++; return 'if (buffer instanceof ArrayBuffer || Object.prototype.toString.call(buffer) === "[object ArrayBuffer]") {'; }
@@ -525,18 +517,15 @@ function firefoxArrayBufferFix() {
         },
     };
 }
-
-// Add to your Rollup plugins array:
-// plugins: [resolve({ browser: true }), commonjs(), firefoxArrayBufferFix()]
 ```
 
-This has no effect on Chrome where `instanceof` works correctly across realms.
+No effect on Chrome where `instanceof` works across realms.
 
 ### 2. CustomEvent Detail (cross-realm property access)
 
-When dispatching `CustomEvent` from a content script, the page's JavaScript cannot read the `detail` property because it was created in the content script's realm. This causes `"Permission denied to access property"` errors.
+The page's JavaScript can't read `detail` on a `CustomEvent` created in the content script's realm.
 
-**Fix (dispatching events):** Use Firefox's `cloneInto()` to create the detail in the page's realm:
+**Dispatching events:**
 
 ```js
 function dispatchPageEvent(eventName, detail = {}) {
@@ -547,7 +536,7 @@ function dispatchPageEvent(eventName, detail = {}) {
 }
 ```
 
-**Fix (reading events):** Wrap `e.detail` access in a try/catch:
+**Reading events:**
 
 ```js
 document.addEventListener('modalOpen', (e) => {
@@ -557,73 +546,34 @@ document.addEventListener('modalOpen', (e) => {
     } catch {
         detail = {};
     }
-    // Use detail.modal, detail.data, etc.
 });
 ```
 
 ### 3. Socket Connect Timeout
 
-Since the socket may fail to connect on Firefox (or any browser), wrap the `await socket.connect()` call with a timeout to prevent it from blocking the rest of your extension:
+Wrap the connect call with a timeout so a failed socket doesn't block the rest of your extension:
 
 ```js
 try {
-    const connectTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('connection timeout')), 10000)
-    );
     await Promise.race([
         socket.connect(io, msgpackParser, { token: null }),
-        connectTimeout,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
     ]);
 } catch (err) {
-    console.warn('Socket connection failed:', err.message);
-}
-// Everything below runs regardless of socket status
-```
-
-## Chat Message Object Reference
-
-Messages received via `chat.messages.onMessage()`:
-
-```js
-{
-  id: "e9d008d1-...",           // Message UUID
-          user: {
-    id: "6fac9c70-...",         // User UUID ("happening" for system events)
-            displayName: "BarryThePirate",
-            photoURL: "https://cdn.fishtank.live/avatars/rchl.png",
-            customUsernameColor: "#966b9e",
-            clan: null,                  // Clan tag or null
-            clanColor: null,             // Clan colour or null
-            medals: ["tinnitus", "swag", "season-pass", ...],
-            xp: 451,
-            endorsement: null,
-            endorsementColor: null,
-  },
-  message: "The world is a vampire", // Message text
-          type: "message",
-          admin: false,
-          timestamp: 1742519388236,      // Unix timestamp (ms)
-          mentions: [                    // Array of mention objects
-    { displayName: "someuser", userId: "uuid-..." }
-  ],
-          clips: [],
-          metadata: {
-    isGrandMarshall: false,
-            isEpic: false,
-            isFish: false,               // Contestant
-            isFree: false,               // No season pass
-            isAdmin: false,
-            isMod: false,
-            watching: "",                // Room code being watched
-  },
-  tempId: "019d112d-...",
-          nsp: "/",                      // Namespace ("/" = global chat)
+    console.warn('Socket failed:', err.message);
 }
 ```
 
-**Important:** Socket `chat:message` data arrives wrapped in an array — `[{...}]` not `{...}`. The `chat.messages` module handles this automatically, but if you use `socket.on('chat:message')` directly, unwrap it: `const msg = Array.isArray(data) ? data[0] : data;`
+## Raw Socket Data
 
-**Important:** The `mentions` field contains objects `{ displayName, userId }`, not strings.
+If you use `socket.on()` directly instead of `chat.messages`, be aware of these quirks:
+
+- **`chat:message` is array-wrapped:** The data arrives as `[{...}]` not `{...}`. Unwrap with `const msg = Array.isArray(data) ? data[0] : data;`
+- **`mentions` contains objects**, not strings: `[{ displayName: "user", userId: "uuid" }]`
+- **TTS/SFX events fire on both `:insert` and `:update`**, inconsistently. Listen on both and deduplicate by ID.
+- **Role is split across metadata flags** (`isAdmin`, `isMod`, `isFish`, `isGrandMarshall`, `isEpic`). Multiple can be true — resolve by priority.
+
+The `chat.messages` module handles all of this automatically.
 
 ## Building
 
@@ -635,20 +585,22 @@ npm run watch    # Rebuild on changes
 
 ## Architecture
 
-The SDK is organised into layers:
-
-1. **Core** (`src/core/`) — Low-level access: React fiber, Socket.IO, DOM, events, storage
-2. **Feature Modules** (`src/chat/`, `src/player/`, `src/ui/`) — High-level APIs built on core
-3. **Adapters** (`src/adapters/`) — Site-version-specific configuration
+```
+src/
+├── core/           — Low-level: React fiber, Socket.IO, DOM, events, storage
+├── chat/           — Chat observation (DOM + Socket.IO), input helpers
+├── player/         — Video player, stream/room name resolution
+├── ui/             — Keyboard shortcuts, modals, toasts, toast observer
+└── adapters/       — Site-version-specific configuration (current + classic stub)
+```
 
 ### Design Principles
 
-- **Data layer first** — Access Zustand stores and Socket.IO for data; DOM only for UI injection
-- **No class name dependencies** — Never rely on Tailwind utility classes for element identification
 - **Non-destructive** — Never modify the site's own connections, state, or event handlers
-- **Extension-store friendly** — No monkey-patching, no remote code loading, no eval
+- **Extension-store friendly** — No monkey-patching, no remote code, no eval
 - **Fail silently** — Missing elements return null, never throw in production paths
 - **Namespaced DOM** — All injected elements use `data-ftl-sdk` attributes
+- **Performance-aware** — No persistent body-level MutationObservers (the site generates thousands of chat mutations per second)
 
 ## License
 
