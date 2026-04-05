@@ -16,9 +16,89 @@ import { site, chat, ui, socket } from 'ftl-ext-sdk';
 
 ### Tampermonkey / Greasemonkey
 
-[Implementation Bounty Open](https://github.com/BarryThePirate/ftl-ext-sdk/issues/1). Reward: ₣1,000 Site Tokens.
+The SDK now supports Tampermonkey and Greasemonkey userscripts! The UMD bundle includes all dependencies (socket.io-client and socket.io-msgpack-parser) and exposes the full SDK as `window.FTL`.
 
-Support planned. The SDK currently uses ES module exports and needs a UMD/IIFE bundle with `window.FTL` for userscript environments.
+#### Installation
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/) (Chrome/Edge/Firefox) or [Greasemonkey](https://www.greasespot.net/) (Firefox)
+2. Create a new userscript
+3. Add the SDK as a `@require` directive:
+
+```javascript
+// ==UserScript==
+// @name         My FTL Userscript
+// @namespace    http://tampermonkey.net/
+// @version      0.1.0
+// @description  My fishtank.live userscript
+// @author       Your Name
+// @match        https://fishtank.live/*
+// @grant        none
+// @require      https://github.com/BarryThePirate/ftl-ext-sdk/raw/main/dist/ftl-ext-sdk.bundle.js
+// ==/UserScript==
+```
+
+#### Usage
+
+```javascript
+// Wait for the SDK to load
+function waitForSDK() {
+    if (typeof window.FTL !== 'undefined') {
+        initSDK();
+    } else {
+        setTimeout(waitForSDK, 100);
+    }
+}
+
+// Initialize the SDK
+async function initSDK() {
+    console.log('[FTL] SDK loaded, initializing...');
+
+    try {
+        // Connect to the socket (anonymous, no token needed for reading)
+        await window.FTL.socket.connect({ token: null });
+        console.log('[FTL] Connected to fishtank.live');
+
+        // Listen for chat messages
+        window.FTL.socket.on(window.FTL.socket.EVENTS.CHAT_MESSAGE, (data) => {
+            console.log('[FTL] Chat message:', data);
+        });
+
+        // Listen for connection events
+        window.FTL.socket.on('connect', () => {
+            console.log('[FTL] Socket connected');
+        });
+
+        window.FTL.socket.on('disconnect', () => {
+            console.log('[FTL] Socket disconnected');
+        });
+
+    } catch (error) {
+        console.error('[FTL] Error initializing SDK:', error);
+    }
+}
+
+// Start waiting for SDK
+waitForSDK();
+```
+
+#### Example Userscript
+
+A complete example is available in [`examples/tampermonkey-demo.user.js`](examples/tampermonkey-demo.user.js). This demo:
+
+- Connects to fishtank.live
+- Logs all chat messages to the console
+- Shows toast notifications for new messages
+- Handles connection events
+
+#### Firefox Compatibility
+
+The UMD bundle includes Firefox ArrayBuffer fixes to handle cross-realm `instanceof` failures. No additional configuration is needed for Firefox userscripts.
+
+#### Notes
+
+- The SDK uses `@grant none` to avoid permission issues
+- All dependencies are bundled, so no additional `@require` directives are needed
+- The bundle is minified and includes source maps for debugging
 
 ## Quick Start
 
